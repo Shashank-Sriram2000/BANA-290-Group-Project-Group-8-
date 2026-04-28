@@ -1,0 +1,4 @@
+,coef,std_err,p_value
+Intercept,5.2229,0.0349,0.0
+post_intervention,-1.0394,0.0836,0.0
+did_interaction,0.1356,0.2505,0.5883
