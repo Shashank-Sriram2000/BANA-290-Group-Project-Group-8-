@@ -180,3 +180,78 @@ p <- ggplot(agg_data, aes(x = date, y = question_count, color = group)) +
            label = "Placebo: Nov 2021", angle = 90, vjust = -0.5, hjust = 1, color = "red")
 
 print(p)
+
+
+
+
+library(ggplot2)
+
+# ---------- Data preparation ----------
+df <- read.csv("so_panel.csv", stringsAsFactors = FALSE)
+df$date <- as.Date(df$date)
+df$time_index <- as.numeric(df$time_index)
+intervention_date <- as.Date("2022-11-01")
+df$post <- ifelse(df$date >= intervention_date, 1, 0)
+df$t <- df$time_index - min(df$time_index)
+df$post_t <- df$post * df$t
+
+# Aggregate total question count per time_index
+agg_its <- aggregate(question_count ~ time_index + t + post + post_t, data = df, FUN = sum)
+
+# ---------- ITS model (full) ----------
+its_model <- lm(question_count ~ t + post + post_t, data = agg_its)
+agg_its$predicted <- predict(its_model)
+
+
+
+
+# ---------- Counterfactual: fit pre-intervention only ----------
+pre_data <- agg_its[agg_its$post == 0, ]
+pre_model <- lm(question_count ~ t, data = pre_data)
+
+# Predict counterfactual for all time points (extrapolating pre-trend)
+agg_its$counterfactual <- predict(pre_model, newdata = agg_its)
+
+# ---------- Plot with gap shaded ----------
+ggplot(agg_its, aes(x = time_index)) +
+  # Actual data points (optional)
+  geom_line(aes(y = question_count), color = "gray50", linewidth = 0.8) +
+  # Fitted ITS line
+  geom_line(aes(y = predicted), color = "blue", linewidth = 1) +
+  # Counterfactual (pre-trend extrapolation)
+  geom_line(aes(y = counterfactual), color = "darkgreen", linetype = "dashed", linewidth = 1) +
+  # Shade the gap between counterfactual and actual (or fitted)
+  geom_ribbon(aes(ymin = predicted, ymax = counterfactual), 
+              fill = "red", alpha = 0.2, data = agg_its[agg_its$post == 1, ]) +
+  # Vertical line at intervention
+  geom_vline(xintercept = min(agg_its$time_index[agg_its$post == 1]), 
+             linetype = "dashed", color = "red", linewidth = 1) +
+  labs(title = "Interrupted Time Series: Total Question Count",
+       subtitle = "Blue = fitted ITS model, Green dashed = pretrend extrapolation, Red shade = post intervention gap",
+       x = "Time index", y = "Total questions",
+       caption = "Red vertical line = November 2022 (ChatGPT release)") +
+  theme_minimal()
+
+
+# ---------- Compute the initial gap at intervention ----------
+# Find the first time_index where post == 1
+T0_index <- min(agg_its$time_index[agg_its$post == 1])
+
+# Get the actual question count and counterfactual at that time
+actual_at_T0 <- agg_its$question_count[agg_its$time_index == T0_index]
+counterfactual_at_T0 <- agg_its$counterfactual[agg_its$time_index == T0_index]
+
+# Gap = counterfactual - actual  (positive means actual is lower)
+initial_gap <- counterfactual_at_T0 - actual_at_T0
+
+# Also get the predicted value from the full ITS model at T0
+predicted_at_T0 <- agg_its$predicted[agg_its$time_index == T0_index]
+
+# Output results
+cat("\n========== Initial Gap at Intervention (Nov 2022) ==========\n")
+cat("Time index at intervention:", T0_index, "\n")
+cat("Actual total questions at intervention:", actual_at_T0, "\n")
+cat("Counterfactual (pre‑trend extrapolation):", counterfactual_at_T0, "\n")
+cat("Predicted from full ITS model:", predicted_at_T0, "\n")
+cat("Initial gap (counterfactual - actual):", initial_gap, "\n")
+cat("Percentage gap relative to counterfactual:", round(100 * initial_gap / counterfactual_at_T0, 2), "%\n")
